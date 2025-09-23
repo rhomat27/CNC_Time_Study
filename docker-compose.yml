@@ -1,0 +1,26 @@
+version: "3.3"
+
+services:
+  backend:
+    build: ./backend
+    container_name: cnc-time-study_backend
+    ports:
+      - "8009:8000"
+    networks:
+      - cncnet
+
+  frontend:
+    build: ./frontend
+    container_name: cnc-time-study_frontend
+    ports:
+      - "3009:3000"
+    env_file:
+      - ./frontend/.env
+    depends_on:
+      - backend
+    networks:
+      - cncnet
+
+networks:
+  cncnet:
+    driver: bridge
