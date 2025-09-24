@@ -32,7 +32,7 @@ app.add_middleware(
 # Helpers
 # =============================================================================
 
-TOKEN_RE = re.compile(r"([A-Za-z][+\-0-9.]+)")
+TOKEN_RE = re.compile(r"([A-Z])([-+]?\d*\.?\d*)")
 
 def strip_semicolon_comments(line: str) -> str:
     if ";" in line:
@@ -161,7 +161,7 @@ async def analyze(
         if not line:
             continue
 
-        parts = TOKEN_RE.findall(line.upper())
+        parts = ["".join(p) for p in TOKEN_RE.findall(line.upper())]
         if not parts:
             continue
         cmd = parts[0]
@@ -256,9 +256,11 @@ async def analyze(
 
         # Arcs
         if cmd in ("G2", "G02", "G3", "G03"):
+            # Parse all parameters first
             nx, ny = x, y
             i_off = j_off = 0.0
             local_feed = feed_mm_min
+
             for t in parts[1:]:
                 if t.startswith("X"):
                     val = float(t[1:]) * unit_factor
@@ -267,28 +269,57 @@ async def analyze(
                     val = float(t[1:]) * unit_factor
                     ny = val if absolute_mode else (y + val)
                 elif t.startswith("I"):
-                    i_off = float(t[1:]) * unit_factor
+                    try:
+                        i_off = float(t[1:]) * unit_factor  # relative to start
+                    except ValueError:
+                        i_off = 0.0
                 elif t.startswith("J"):
-                    j_off = float(t[1:]) * unit_factor
+                    try:
+                        j_off = float(t[1:]) * unit_factor  # relative to start
+                    except ValueError:
+                        j_off = 0.0
                 elif t.startswith("F"):
                     local_feed = float(t[1:]) * unit_factor
-            # Arc center handling
-                cx = x + i_off
-                cy = y + j_off
-            r = math.hypot(x - cx, y - cy)
-            if r <= 0.0:
+
+            # Require at least one of I/J (typical IJ-center mode)
+            if abs(i_off) < 1e-12 and abs(j_off) < 1e-12:
+                # No valid center → do NOT emit a bogus arc.
+                # Just move the position (like a degenerate move) and warn.
+                print(f"WARNING: {cmd} missing I/J; skipping arc and jumping to end point ({nx:.4f},{ny:.4f}).")
                 x, y = nx, ny
                 continue
+
+            # Compute center and radius
+            cx, cy = x + i_off, y + j_off
+            r = math.hypot(x - cx, y - cy)
+            if r <= 0.0:
+                print(f"WARNING: {cmd} computed zero radius; skipping.")
+                x, y = nx, ny
+                continue
+
+            # Angles
             a1 = math.atan2(y - cy, x - cx)
             a2 = math.atan2(ny - cy, nx - cx)
-            if (abs(nx - x) < 1e-9 and abs(ny - y) < 1e-9 and (abs(i_off) > 1e-12 or abs(j_off) > 1e-12)):
-                delta = -2.0 * math.pi if cmd.startswith("G2") else 2.0 * math.pi
-            else:
-                delta = a2 - a1
-                if cmd.startswith("G2") and delta > 0:
-                    delta -= 2.0 * math.pi
-                if cmd.startswith("G3") and delta < 0:
-                    delta += 2.0 * math.pi
+
+            # Direction and sweep
+            cw = cmd.startswith("G2") or cmd.startswith("G02")
+            delta = a2 - a1
+            if cw and delta > 0:
+                delta -= 2.0 * math.pi
+            if (not cw) and delta < 0:
+                delta += 2.0 * math.pi
+
+            # Full circle special case (end == start but IJ present)
+            if abs(nx - x) < 1e-9 and abs(ny - y) < 1e-9:
+                delta = (-2.0 if cw else 2.0) * math.pi
+
+            # Debug (single line per arc)
+            print(
+                f"ARC DEBUG: cmd={cmd}, start=({x:.4f},{y:.4f}), end=({nx:.4f},{ny:.4f}), "
+                f"I={i_off:.4f}, J={j_off:.4f}, cx={cx:.4f}, cy={cy:.4f}, unit_factor={unit_factor}"
+            )
+
+            # Timing + segmentation
             arc_len = abs(delta) * r
             if beam_on:
                 fr = local_feed if local_feed > 0 else default_cut_mm_min
@@ -297,6 +328,8 @@ async def analyze(
             else:
                 travel_time_s += move_time_trap(arc_len, default_rapid_mm_min, rapid_accel_g)
                 seg_kind = "travel"
+
+            # Emit small line segments along arc
             steps = max(40, int(abs(delta) * 80))
             px_prev, py_prev = x, y
             for s in range(1, steps + 1):
@@ -305,6 +338,7 @@ async def analyze(
                 py = cy + r * math.sin(ang)
                 add_segment(toolpath, seg_kind, (px_prev, py_prev), (px, py))
                 px_prev, py_prev = px, py
+
             x, y = nx, ny
             continue
 
