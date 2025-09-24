@@ -122,10 +122,7 @@ async def analyze(
     metric_mode_code: str      = Form("G71"),
     abs_mode_code: str         = Form("G90"),
     rel_mode_code: str         = Form("G91"),
-    follow_program_arcs: str   = Form("false"),
 ):
-# convert string to bool
-    follow_program_arcs = follow_program_arcs.lower() == "true"
 
     # -------------------------------------------------------------------------
     # Defaults
@@ -276,14 +273,6 @@ async def analyze(
                 elif t.startswith("F"):
                     local_feed = float(t[1:]) * unit_factor
             # Arc center handling
-            if follow_program_arcs:
-                if absolute_mode:
-                    cx = i_off
-                    cy = j_off
-                else:
-                    cx = x + i_off
-                    cy = y + j_off
-            else:
                 cx = x + i_off
                 cy = y + j_off
             r = math.hypot(x - cx, y - cy)

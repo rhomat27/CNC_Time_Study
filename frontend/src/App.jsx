@@ -19,7 +19,6 @@ function App() {
     metric_mode_code: "G71",
     abs_mode_code: "G90",
     rel_mode_code: "G91",
-    followProgramArcs: false,
   });
 
   const handleFileChange = (e) => {
@@ -188,18 +187,7 @@ function App() {
             }
           />
         </div>
-        <div>
-          <label>
-            <input
-              type="checkbox"
-              checked={config.followProgramArcs}
-              onChange={(e) =>
-                setConfig({ ...config, followProgramArcs: e.target.checked })
-              }
-            />
-            Arc Centers Follow Program Coordinates (G90/G91)
-          </label>
-        </div>
+
         <button type="submit">Analyze</button>
       </form>
 
